@@ -1,0 +1,13 @@
+version: 1
+logging:
+  output: stdout
+hostname: goboot-qemu
+services:
+  - name: restart-probe
+    command: [/bin/bootprobe]
+    restart: on-failure
+    environment:
+      GOBOOT_FAIL_ONCE: /tmp/goboot-restart-marker
+  - name: second-probe
+    command: [/bin/bootprobe]
+on_exit: poweroff

@@ -1,0 +1,23 @@
+version: 1
+logging:
+  output: stdout
+module_tree: /modules
+modules: [virtio_net]
+hostname: goboot-qemu
+interfaces:
+  - name: eth0
+    addresses: [192.0.2.10/24, '2001:db8::10/64']
+    routes:
+      - {destination: 0.0.0.0/0, gateway: 192.0.2.1}
+      - {destination: '2001:db8:1::/64', gateway: '2001:db8::1'}
+resolv_conf: |
+  nameserver 192.0.2.1
+hosts: |
+  127.0.0.1 localhost
+services:
+  - name: bootprobe
+    command: [/bin/bootprobe]
+    environment:
+      GOBOOT_EXPECT_NETWORK: eth0
+      GOBOOT_EXPECT_FILES: "1"
+on_exit: poweroff

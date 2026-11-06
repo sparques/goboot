@@ -173,13 +173,16 @@ func (c *Config) Validate() error {
 		if err := validateMount("root", *c.Root); err != nil {
 			return err
 		}
+		if c.Root.Target == "/" {
+			return errors.New("root.target: omit root to keep the current root")
+		}
 	}
 	if len(c.Hostname) > 64 || strings.ContainsAny(c.Hostname, "\x00\n") {
 		return errors.New("hostname: must be at most 64 bytes and contain no NUL or newline")
 	}
 	seenInterfaces := make(map[string]bool)
 	for i, iface := range c.Interfaces {
-		if iface.Name == "" || strings.ContainsAny(iface.Name, "/\x00\n") || seenInterfaces[iface.Name] {
+		if iface.Name == "" || len(iface.Name) >= 16 || strings.ContainsAny(iface.Name, "/\x00\n") || seenInterfaces[iface.Name] {
 			return fmt.Errorf("interfaces[%d]: invalid or duplicate name", i)
 		}
 		seenInterfaces[iface.Name] = true
@@ -192,8 +195,12 @@ func (c *Config) Validate() error {
 			if _, _, err := net.ParseCIDR(route.Destination); err != nil {
 				return fmt.Errorf("interfaces[%d].routes[%d].destination: %w", i, j, err)
 			}
-			if route.Gateway != "" && net.ParseIP(route.Gateway) == nil {
-				return fmt.Errorf("interfaces[%d].routes[%d].gateway: invalid IP", i, j)
+			if route.Gateway != "" {
+				gateway := net.ParseIP(route.Gateway)
+				_, destination, _ := net.ParseCIDR(route.Destination)
+				if gateway == nil || (gateway.To4() == nil) != (destination.IP.To4() == nil) {
+					return fmt.Errorf("interfaces[%d].routes[%d].gateway: invalid IP or family mismatch", i, j)
+				}
 			}
 		}
 	}

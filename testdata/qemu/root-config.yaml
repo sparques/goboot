@@ -1,0 +1,19 @@
+version: 1
+logging:
+  output: stdout
+root:
+  source: /dev/vda
+  target: /newroot
+  type: ext4
+hostname: goboot-qemu
+resolv_conf: |
+  nameserver 192.0.2.1
+hosts: |
+  127.0.0.1 localhost
+services:
+  - name: bootprobe
+    command: [/bin/bootprobe]
+    environment:
+      GOBOOT_EXPECT_ROOT: /etc/goboot-root-marker
+      GOBOOT_EXPECT_FILES: "1"
+on_exit: poweroff

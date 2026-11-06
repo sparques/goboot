@@ -1,0 +1,10 @@
+version: 1
+logging:
+  output: stdout
+hostname: goboot-qemu
+services:
+  - name: shutdown-probe
+    command: [/bin/bootprobe]
+    environment:
+      GOBOOT_TRIGGER_SHUTDOWN: "1"
+on_exit: poweroff

@@ -61,44 +61,44 @@ hostname are changed by automated tests.
 
 ## 3. Resolve kernel modules and set up the root filesystem
 
-- [ ] Resolve each configured module and its transitive dependencies from the
+- [x] Resolve each configured module and its transitive dependencies from the
   module tree's dependency metadata (for example, `modules.dep`), without
   invoking `modprobe` or another external binary. Document how names and paths
   map to that tree, and report missing or ambiguous dependencies clearly. Expose
   the module-loading syscall through an exported package function.
-- [ ] Deduplicate modules by their resolved identity, including modules named
+- [x] Deduplicate modules by their resolved identity, including modules named
   more than once or listed both directly and as dependencies. Treat redundant
   config entries as valid. Detect dependency cycles, then load each required
   module once in dependency-first order with the Linux module-loading syscall.
   The order of entries in YAML must not affect correctness. Handle modules
   already loaded by the kernel and report the module and syscall error on other
   failures.
-- [ ] Implement an optional root switch only when the configured root differs
-  from the current root. Mount the target root, meet `pivot_root` mount-tree
-  prerequisites, switch root and working directory, then detach the old root.
-  Define the treatment of `/dev`, `/proc`, and `/sys` across the switch so the
-  final root has the configured filesystems. Export the root-switch operation
-  for callers that need to compose their own init sequence.
-- [ ] Specify failure behavior for each privileged boot step: emit an actionable
+- [x] Implement an optional root switch only when the configured root differs
+  from the current root. Mount the target root; use `pivot_root` and detach the
+  old root when possible, or move and `chroot` from initramfs `rootfs` (which
+  cannot be pivoted). Define the treatment of `/dev`, `/proc`, and `/sys` across
+  the switch so the final root has the configured filesystems. Export the root
+  switch operation for callers that need to compose their own init sequence.
+- [x] Specify failure behavior for each privileged boot step: emit an actionable
   `slog` error and enter a documented safe PID-1 failure state or reboot policy.
 
 **Done when:** unit tests cover transitive dependencies, reversed config order,
 duplicate entries, already-loaded modules, missing dependencies, and cycles; a
-QEMU test boots from an initramfs, pivots into a separate root, and verifies
+QEMU test boots from an initramfs, switches into a separate root, and verifies
 mounts, hostname, and service execution from the final root.
 
 ## 4. Configure networking and system files
 
-- [ ] Bring up `lo` and assign `127.0.0.1/8` by default. Implement optional
+- [x] Bring up `lo` and assign `127.0.0.1/8` by default. Implement optional
   interface state, addresses, and routes through Linux netlink/syscalls, with no
   dependency on `ip`, `ifconfig`, or DHCP executables. Define whether DHCP is
   in scope; initially accept only explicit static settings unless implemented.
   Export the networking operations for importing Go programs.
-- [ ] Write `/etc/resolv.conf` and `/etc/hosts` on the final root only when their
+- [x] Write `/etc/resolv.conf` and `/etc/hosts` on the final root only when their
   respective YAML fields are present. An absent field leaves an existing or
   missing file untouched. A present field replaces the file, including when
   configured with empty content. Use safe file creation and replacement.
-- [ ] Give interface and file-write failures clear context; document which
+- [x] Give interface and file-write failures clear context; document which
   failures stop boot and which, if any, can be configured as nonfatal.
 
 **Done when:** a network namespace or QEMU test verifies default loopback,
@@ -106,15 +106,15 @@ static interface settings, and the absent/present semantics of both files.
 
 ## 5. Supervise services and handle PID 1 lifecycle
 
-- [ ] Define service command/arguments, working directory, environment,
+- [x] Define service command/arguments, working directory, environment,
   startup order, and restart modes (`never`, `on-failure`, `always`). State what
   counts as failure, and add bounded restart delay/backoff to avoid a busy loop.
-- [ ] Reap all children, including orphans adopted by PID 1. Coordinate SIGCHLD,
+- [x] Reap all children, including orphans adopted by PID 1. Coordinate SIGCHLD,
   service exits, and configured restart decisions without losing exit events.
-- [ ] Handle termination signals: stop services, wait for a bounded grace
+- [x] Handle termination signals: stop services, wait for a bounded grace
   period, force-stop survivors, and reap children. Define what happens if the
-  primary service exits or all configured services stop.
-- [ ] Implement configured reboot/poweroff behavior via the Linux reboot syscall
+  a service exits or all configured services stop.
+- [x] Implement configured reboot/poweroff behavior via the Linux reboot syscall
   after clean shutdown. Define the non-PID-1 behavior separately so development
   runs do not reboot the host.
 

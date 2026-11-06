@@ -5,4 +5,6 @@ hostname: goboot-qemu
 services:
   - name: bootprobe
     command: [/bin/bootprobe]
+    environment:
+      GOBOOT_EXPECT_FILES: absent
 on_exit: poweroff

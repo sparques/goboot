@@ -40,8 +40,11 @@ func TestParseRejectsInvalidConfig(t *testing.T) {
 		{"relative log", "version: 1\nlogging:\n  output: log.txt\n", "logging.output"},
 		{"null hosts", "version: 1\nhosts: null\n", "must be a string"},
 		{"bad module path", "version: 1\nmodules: [../escape.ko]\n", "modules[0]"},
+		{"current root target", "version: 1\nroot: {source: /dev/vda, target: /, type: ext4}\n", "root.target"},
 		{"duplicate service", "version: 1\nservices:\n  - name: app\n    command: [/bin/app]\n  - name: app\n    command: [/bin/app]\n", "duplicate name"},
 		{"bad network", "version: 1\ninterfaces:\n  - name: eth0\n    addresses: [not-a-cidr]\n", "addresses[0]"},
+		{"gateway family mismatch", "version: 1\ninterfaces:\n  - name: eth0\n    routes: [{destination: 0.0.0.0/0, gateway: '2001:db8::1'}]\n", "family mismatch"},
+		{"interface name too long", "version: 1\ninterfaces: [{name: aaaaaaaaaaaaaaaa}]\n", "invalid or duplicate name"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

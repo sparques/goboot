@@ -46,6 +46,29 @@ func main() {
 		startupError("boot failed", err)
 		fail()
 	}
+	if os.Getpid() == 1 {
+		reaperCtx, stopReaper := context.WithCancel(context.Background())
+		reaperDone := make(chan error, 1)
+		go func() { reaperDone <- runtime.ReapOrphans(reaperCtx) }()
+		reaperReceived := false
+		select {
+		case <-runtime.Done():
+		case err = <-reaperDone:
+			reaperReceived = true
+			if err != nil {
+				runtime.Stop()
+				startupError("orphan reaping failed", err)
+				fail()
+			}
+		}
+		stopReaper()
+		if !reaperReceived {
+			if err = <-reaperDone; err != nil {
+				startupError("orphan reaping failed", err)
+				fail()
+			}
+		}
+	}
 	if err := runtime.Wait(); err != nil {
 		startupError("service failed", err)
 		fail()
@@ -57,7 +80,7 @@ func main() {
 		case "poweroff":
 			err = goboot.Reboot(goboot.PowerOff)
 		default:
-			err = goboot.WaitForChildren(ctx)
+			err = goboot.WaitForChildren(context.Background())
 		}
 		startupError("PID 1 exit action failed", err)
 		fail()
@@ -78,9 +101,12 @@ func startupError(message string, err error) {
 
 func fail() {
 	if os.Getpid() == 1 {
-		// Until the PID 1 supervisor exists, stay alive after an early error.
+		// Keep PID 1 alive and reap adopted children after an unrecoverable error.
 		for {
-			time.Sleep(time.Hour)
+			if err := goboot.WaitForChildren(context.Background()); err != nil {
+				startupError("child reaping failed", err)
+				time.Sleep(time.Second)
+			}
 		}
 	}
 	os.Exit(1)

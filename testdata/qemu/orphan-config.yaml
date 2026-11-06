@@ -1,0 +1,14 @@
+version: 1
+logging:
+  output: stdout
+hostname: goboot-qemu
+services:
+  - name: orphan-spawner
+    command: [/bin/bootprobe]
+    environment:
+      GOBOOT_SPAWN_ORPHAN: "1"
+  - name: orphan-watcher
+    command: [/bin/bootprobe]
+    environment:
+      GOBOOT_VERIFY_ORPHAN: "1"
+on_exit: poweroff

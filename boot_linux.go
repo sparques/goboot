@@ -16,13 +16,30 @@ import (
 type bootSystem interface {
 	mountSystem
 	MakeMountsPrivate() error
+	LoadModules(string, []string) error
+	SwitchRoot(MountConfig) error
 	SetHostname(string) error
-	StartService(context.Context, ServiceConfig, []string) (serviceProcess, error)
+	SetupNetwork([]InterfaceConfig) error
+	WriteSystemFiles(*Config) error
+	StartService(ServiceConfig, []string) (serviceProcess, error)
 }
 
 type serviceProcess interface {
 	Wait() error
+	Signal(os.Signal) error
+	Kill() error
+	PID() int
 }
+
+type commandProcess struct{ command *exec.Cmd }
+
+func (p commandProcess) Wait() error { return p.command.Wait() }
+
+func (p commandProcess) Signal(signal os.Signal) error { return p.command.Process.Signal(signal) }
+
+func (p commandProcess) Kill() error { return p.command.Process.Kill() }
+
+func (p commandProcess) PID() int { return p.command.Process.Pid }
 
 type linuxBootSystem struct {
 	linuxMountSystem
@@ -30,6 +47,20 @@ type linuxBootSystem struct {
 
 func (linuxBootSystem) MakeMountsPrivate() error {
 	return MakeMountsPrivate()
+}
+
+func (linuxBootSystem) LoadModules(tree string, modules []string) error {
+	return LoadModules(tree, modules)
+}
+
+func (linuxBootSystem) SwitchRoot(root MountConfig) error { return SwitchRoot(root) }
+
+func (linuxBootSystem) SetupNetwork(interfaces []InterfaceConfig) error {
+	return SetupNetwork(interfaces)
+}
+
+func (linuxBootSystem) WriteSystemFiles(cfg *Config) error {
+	return WriteSystemFiles(cfg)
 }
 
 // MakeMountsPrivate stops mount propagation to other namespaces.
@@ -49,8 +80,8 @@ func SetHostname(name string) error {
 	return syscall.Sethostname([]byte(name))
 }
 
-func (linuxBootSystem) StartService(ctx context.Context, service ServiceConfig, environment []string) (serviceProcess, error) {
-	command := exec.CommandContext(ctx, service.Command[0], service.Command[1:]...)
+func (linuxBootSystem) StartService(service ServiceConfig, environment []string) (serviceProcess, error) {
+	command := exec.Command(service.Command[0], service.Command[1:]...)
 	command.Dir = service.Directory
 	if command.Dir == "" {
 		command.Dir = "/"
@@ -62,27 +93,7 @@ func (linuxBootSystem) StartService(ctx context.Context, service ServiceConfig, 
 	if err := command.Start(); err != nil {
 		return nil, err
 	}
-	return command, nil
-}
-
-// Runtime tracks services started by Run. It does not own the caller's process.
-type Runtime struct {
-	done chan struct{}
-	err  error
-}
-
-// Wait reports the service's exit. It can be called more than once.
-func (r *Runtime) Wait() error {
-	if r == nil {
-		return errors.New("nil runtime")
-	}
-	<-r.done
-	return r.err
-}
-
-// Done closes after all currently supported services have exited.
-func (r *Runtime) Done() <-chan struct{} {
-	return r.done
+	return commandProcess{command: command}, nil
 }
 
 // Run performs boot setup, starts configured services, and returns control to
@@ -112,7 +123,7 @@ func ensureDevelopmentIsolation(cfg *Config) error {
 	if os.Getpid() == 1 {
 		return nil
 	}
-	for _, namespace := range []string{"mnt", "uts"} {
+	for _, namespace := range []string{"mnt", "uts", "net"} {
 		if namespace == "uts" && cfg.Hostname == "" {
 			continue
 		}
@@ -138,21 +149,24 @@ func validateRunnable(cfg *Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if len(cfg.Modules) != 0 || cfg.Root != nil || len(cfg.Interfaces) != 0 || cfg.ResolvConf.Present || cfg.Hosts.Present {
-		return errors.New("module loading, root switching, networking, and system file writes are not implemented yet")
-	}
-	if len(cfg.Services) > 1 {
-		return errors.New("the current boot path supports at most one service")
-	}
-	if len(cfg.Services) == 1 && cfg.Services[0].Restart != "never" {
-		return errors.New("service restart policies are not implemented yet")
-	}
 	return nil
 }
 
 func run(ctx context.Context, cfg *Config, logger *slog.Logger, closer io.Closer, system bootSystem) (*Runtime, error) {
 	if err := system.MakeMountsPrivate(); err != nil {
 		return nil, fmt.Errorf("make mount propagation private: %w", err)
+	}
+	if len(cfg.Modules) != 0 {
+		logger.Info("loading kernel modules", "count", len(cfg.Modules))
+		if err := system.LoadModules(cfg.ModuleTree, cfg.Modules); err != nil {
+			return nil, fmt.Errorf("load kernel modules: %w", err)
+		}
+	}
+	if cfg.Root != nil {
+		logger.Info("switching root filesystem", "target", cfg.Root.Target)
+		if err := system.SwitchRoot(*cfg.Root); err != nil {
+			return nil, fmt.Errorf("switch root: %w", err)
+		}
 	}
 	logger.Info("setting up filesystems")
 	if err := setupMounts(cfg, system); err != nil {
@@ -164,30 +178,17 @@ func run(ctx context.Context, cfg *Config, logger *slog.Logger, closer io.Closer
 			return nil, fmt.Errorf("set hostname %q: %w", cfg.Hostname, err)
 		}
 	}
-	runtime := &Runtime{done: make(chan struct{})}
-	if len(cfg.Services) == 0 {
-		logger.Info("boot setup complete")
-		closer.Close()
-		close(runtime.done)
-		return runtime, nil
+	logger.Info("setting up network")
+	if err := system.SetupNetwork(cfg.Interfaces); err != nil {
+		return nil, fmt.Errorf("set up network: %w", err)
 	}
-	service := cfg.Services[0]
-	logger.Info("starting service", "service", service.Name, "command", service.Command[0])
-	process, err := system.StartService(ctx, service, serviceEnvironment(cfg.Environment, service.Environment))
-	if err != nil {
-		return nil, fmt.Errorf("start service %q: %w", service.Name, err)
-	}
-	go func() {
-		if err := process.Wait(); err != nil {
-			runtime.err = fmt.Errorf("service %q: %w", service.Name, err)
-			logger.Error("service exited", "service", service.Name, "error", err)
-		} else {
-			logger.Info("service exited", "service", service.Name)
+	if cfg.ResolvConf.Present || cfg.Hosts.Present {
+		logger.Info("writing system files")
+		if err := system.WriteSystemFiles(cfg); err != nil {
+			return nil, err
 		}
-		closer.Close()
-		close(runtime.done)
-	}()
-	return runtime, nil
+	}
+	return startServices(ctx, cfg, logger, closer, system)
 }
 
 func serviceEnvironment(global, local map[string]string) []string {

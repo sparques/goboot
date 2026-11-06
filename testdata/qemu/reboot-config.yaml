@@ -1,0 +1,8 @@
+version: 1
+logging:
+  output: stdout
+hostname: goboot-qemu
+services:
+  - name: bootprobe
+    command: [/bin/bootprobe]
+on_exit: reboot
