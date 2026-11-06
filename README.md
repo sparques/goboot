@@ -40,8 +40,7 @@ All information is sourced from the yaml config.
 The configuration parser, boot setup, and service supervisor are implemented.
 Both the standalone executable and an importing Go `/init` boot in QEMU.
 Additional QEMU fixtures cover root switching, static networking, service
-restarts, orphan reaping, graceful shutdown, reboot, and poweroff. See
-[plan.md](plan.md) for deployment work that remains.
+restarts, orphan reaping, graceful shutdown, reboot, and poweroff.
 
 ## Go package API
 
@@ -81,6 +80,33 @@ keep running after `Run` returns.
 ## Configuration (version 1)
 
 [config.example.yaml](config.example.yaml) shows all currently defined fields.
+For an initramfs that runs a single service and stays in that initramfs after
+the service exits, a minimal configuration is:
+
+```yaml
+version: 1
+services:
+  - name: app
+    command: [/bin/app]
+```
+
+To boot a separate ext4 root, include a `root` mount. The root device must
+exist in the initramfs; GoBoot creates the target directory. `/bin/app` must
+exist on the ext4 filesystem:
+
+```yaml
+version: 1
+root: {source: /dev/vda, target: /newroot, type: ext4}
+services:
+  - name: app
+    command: [/bin/app]
+```
+
+The QEMU root fixture is a runnable example in
+[`testdata/qemu/root-config.yaml`](testdata/qemu/root-config.yaml).
+Both examples use `slog` on `/dev/console`; set `logging.output` to an absolute
+path, `stdout`, or `stderr` to change it.
+
 The public Go package provides `Parse([]byte)`, `Load(path)`, and
 `LoadSelected(path, embeddedYAML)`. `LoadSelected` uses a nonempty explicit path
 first and otherwise uses the supplied embedded bytes. It returns an error if
@@ -128,6 +154,24 @@ runs, or directly when running as PID 1.
 
 ## QEMU boot test
 
+`make release` builds Linux x86-64, ARM64, and ARMv7 binaries under
+`.build/release`. It sets `CGO_ENABLED=0` and checks the ELF program headers
+for an interpreter or dynamic loader segment. The build host needs Go,
+`readelf`, and `file`. To build for a single Linux architecture, use:
+
+```sh
+GOCACHE=/tmp CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o goboot-linux-arm64 ./cmd/goboot
+file goboot-linux-arm64
+readelf -l goboot-linux-arm64
+```
+
+The `file` output must say `statically linked`, and `readelf -l` must show no
+`INTERP` or `DYNAMIC` program header. Install the binary as `/init` in the
+initramfs, or build an importing Go `/init` that calls `goboot.Run`. Supply a
+kernel and a matching module tree for the target board. Any configured service
+binary, its script interpreter if applicable, and its runtime dependencies
+must be present in the root where the service starts.
+
 Run `make qemu` for the standalone boot path. `make qemu-import` verifies a
 separate Go `/init` continues after `Run`; `make qemu-root` switches to an ext4
 disk image; `make qemu-network` loads virtio modules and verifies static
@@ -143,6 +187,16 @@ hosts with usable KVM access. The QEMU kernel command line passes an explicit
 config does not change the fixture. The guest configs are in
 [`testdata/qemu`](testdata/qemu). The network fixture copies compressed modules
 from `MODULE_SOURCE`, which must match the QEMU kernel release.
+`make verify` runs race-enabled Go tests, verifies static release binaries, and
+runs all QEMU fixtures. QEMU tests need `qemu-system-x86_64`, `cpio`, an ext4
+formatter, the configured kernel, and matching modules for the network fixture.
+They run under software emulation without elevated privileges. If those tools,
+the kernel, or matching modules are unavailable, run `GOCACHE=/tmp go test
+-race ./...` and record which QEMU fixture was skipped and why. QEMU validates
+the x86-64 boot path; ARM board firmware, device trees, storage, and real
+network hardware still require testing on their target boards.
+On 2026-11-06, `GOCACHE=/tmp make verify` passed: Go tests, the three static
+release builds, and all eight QEMU fixtures. No physical board was tested.
 
 | Field | Meaning and default |
 | --- | --- |
@@ -151,7 +205,7 @@ from `MODULE_SOURCE`, which must match the QEMU kernel release.
 | `module_tree` | Clean absolute path containing kernel modules and `modules.dep`. If omitted, the loader uses `/lib/modules/<running-kernel-release>`. |
 | `modules` | Module names or paths relative to `module_tree`. Order and duplicates do not matter; dependencies are loaded first. Defaults to none. |
 | `mounts` | Mount entries with `source`, absolute `target`, filesystem `type`, optional `flags`, and optional `options` string. If omitted or empty, the boot path mounts `/proc`, `/dev`, `/sys`, and `/tmp` on the final root. |
-| `root` | Optional mount entry for a different root filesystem. Its target is a path in the initial root and cannot be `/`. Omit it to retain the current root. |
+| `root` | Optional mount entry for a different root filesystem. Its target is a path in the initial root and cannot be `/` or under `/dev`, `/proc`, or `/sys`. Omit it to retain the current root. |
 | `hostname` | Optional hostname; at most 64 bytes. |
 | `interfaces` | Optional static interface entries. Each has a unique `name` of at most 15 bytes, CIDR `addresses`, and optional `routes` with CIDR `destination` and optional same-family IP `gateway`. Loopback is always brought up with `127.0.0.1/8`. DHCP is not configured. |
 | `resolv_conf`, `hosts` | Optional string contents for `/etc/resolv.conf` and `/etc/hosts` on the final root. Omitted means untouched; `''` requests an empty file. `null` is invalid. |
@@ -163,6 +217,16 @@ Mount flags currently accepted by validation are `readonly`, `nosuid`, `nodev`,
 `noexec`, `sync`, `dirsync`, `remount`, `bind`, and `rbind`. All configured
 filesystem paths must be clean absolute paths where indicated. Module names and
 paths must not escape `module_tree`; redundant module entries are valid.
+`module_tree`, module paths, `root.source`, `root.target`, and `logging.output`
+are resolved in the initial root. The log output is opened there before any
+root switch, and its descriptor stays open. `mounts[].target`, service commands
+and working directories, and `/etc/resolv.conf` and `/etc/hosts` are resolved
+in the final root. `mounts[].source` is passed to the Linux mount syscall in
+that final root; an absolute device or bind source must exist there. GoBoot
+checks configured path syntax before changing system state. Filesystem
+existence and mount availability are checked as each boot step runs.
+The root target must be a real directory path in the initial root namespace;
+GoBoot rejects a target that resolves through a symlink before mounting it.
 
 Module names match the basename of an entry in `modules.dep`, without its `.ko`,
 `.ko.gz`, `.ko.xz`, or `.ko.zst` suffix. Hyphens and underscores in names are

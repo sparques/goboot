@@ -20,6 +20,7 @@ type rootSystem interface {
 	MoveMount(source, target string) error
 	Unmount(path string, flags int) error
 	Remove(path string) error
+	EvalSymlinks(path string) (string, error)
 }
 
 type linuxRootSystem struct{ linuxMountSystem }
@@ -39,6 +40,8 @@ func (linuxRootSystem) Unmount(path string, flags int) error {
 }
 
 func (linuxRootSystem) Remove(path string) error { return os.Remove(path) }
+
+func (linuxRootSystem) EvalSymlinks(path string) (string, error) { return filepath.EvalSymlinks(path) }
 
 // PivotRoot swaps the process mount namespace's root with newRoot.
 func PivotRoot(newRoot, putOld string) error { return unix.PivotRoot(newRoot, putOld) }
@@ -63,11 +66,18 @@ func SwitchRoot(root MountConfig) error {
 }
 
 func switchRoot(root MountConfig, system rootSystem) error {
-	if err := validateMount("root", root); err != nil {
+	if err := validateRoot(root); err != nil {
 		return err
 	}
-	if root.Target == "/" {
-		return fmt.Errorf("root.target: use an omitted root to keep the current root")
+	if err := system.MkdirAll(root.Target, 0755); err != nil {
+		return fmt.Errorf("create root target %q: %w", root.Target, err)
+	}
+	resolvedTarget, err := system.EvalSymlinks(root.Target)
+	if err != nil {
+		return fmt.Errorf("resolve root target %q: %w", root.Target, err)
+	}
+	if resolvedTarget != root.Target {
+		return fmt.Errorf("root.target: %q resolves to %q; use a directory without symlinks", root.Target, resolvedTarget)
 	}
 	// mountinfo lives in procfs. An initramfs may not have mounted /proc yet.
 	provisionalProc := false

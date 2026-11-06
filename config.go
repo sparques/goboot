@@ -157,11 +157,8 @@ func (c *Config) Validate() error {
 		}
 	}
 	for i, module := range c.Modules {
-		if module == "" || filepath.Clean(module) != module || module == ".." || strings.HasPrefix(module, "../") || strings.ContainsAny(module, "\x00\n") {
+		if !validModulePath(module) {
 			return fmt.Errorf("modules[%d]: invalid module name or path", i)
-		}
-		if filepath.IsAbs(module) {
-			return fmt.Errorf("modules[%d]: use a name or path relative to module_tree", i)
 		}
 	}
 	for i, mount := range c.Mounts {
@@ -170,11 +167,8 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.Root != nil {
-		if err := validateMount("root", *c.Root); err != nil {
+		if err := validateRoot(*c.Root); err != nil {
 			return err
-		}
-		if c.Root.Target == "/" {
-			return errors.New("root.target: omit root to keep the current root")
 		}
 	}
 	if len(c.Hostname) > 64 || strings.ContainsAny(c.Hostname, "\x00\n") {
@@ -251,11 +245,31 @@ func validateMount(name string, mount MountConfig) error {
 	if strings.ContainsAny(mount.Source, "\x00\n") || strings.ContainsAny(mount.Options, "\x00\n") {
 		return fmt.Errorf("%s: source and options must not contain NUL or newline", name)
 	}
+	if filepath.IsAbs(mount.Source) {
+		if err := absoluteCleanPath(name+".source", mount.Source); err != nil {
+			return err
+		}
+	}
 	for _, flag := range mount.Flags {
 		switch flag {
 		case "readonly", "nosuid", "nodev", "noexec", "sync", "dirsync", "remount", "bind", "rbind":
 		default:
 			return fmt.Errorf("%s.flags: unknown flag %q", name, flag)
+		}
+	}
+	return nil
+}
+
+func validateRoot(root MountConfig) error {
+	if err := validateMount("root", root); err != nil {
+		return err
+	}
+	if root.Target == "/" {
+		return errors.New("root.target: omit root to keep the current root")
+	}
+	for _, target := range []string{"/dev", "/proc", "/sys"} {
+		if root.Target == target || strings.HasPrefix(root.Target, target+"/") {
+			return fmt.Errorf("root.target: %q is inside %s; use a directory on the initial root filesystem", root.Target, target)
 		}
 	}
 	return nil

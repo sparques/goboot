@@ -7,11 +7,28 @@ QEMU_MARKER ?= GOBOOT_QEMU_OK
 QEMU_CONFIG ?= testdata/qemu/config.yaml
 QEMU_EXTRA_ARGS ?=
 MODULE_SOURCE ?= /usr/lib/modules/6.18.57-2-lts
+RELEASE_DIR ?= .build/release
 
-.PHONY: goboot qemu qemu-import qemu-root qemu-network qemu-restart qemu-shutdown qemu-orphan qemu-reboot clean
+.PHONY: goboot release verify qemu qemu-import qemu-root qemu-network qemu-restart qemu-shutdown qemu-orphan qemu-reboot clean
 
 goboot:
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -o goboot ./cmd/goboot
+
+release:
+	mkdir -p $(RELEASE_DIR)
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(RELEASE_DIR)/goboot-linux-amd64 ./cmd/goboot
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o $(RELEASE_DIR)/goboot-linux-arm64 ./cmd/goboot
+	GOCACHE=$(GOCACHE) CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -o $(RELEASE_DIR)/goboot-linux-armv7 ./cmd/goboot
+	@for binary in $(RELEASE_DIR)/goboot-linux-*; do \
+		if readelf -l "$$binary" | grep -Eq '^[[:space:]]+(INTERP|DYNAMIC)[[:space:]]'; then \
+			echo "$$binary is dynamically linked" >&2; exit 1; \
+		fi; \
+		file "$$binary"; \
+	done
+
+verify: release
+	GOCACHE=$(GOCACHE) go test -race ./...
+	$(MAKE) qemu qemu-import qemu-root qemu-network qemu-restart qemu-orphan qemu-shutdown qemu-reboot
 
 clean:
 	rm -f goboot

@@ -1,14 +1,3 @@
 version: 1
-logging:
-  output: /dev/console
-mounts:
-  - {source: proc, target: /proc, type: proc}
-  - {source: devtmpfs, target: /dev, type: devtmpfs}
-  - {source: sysfs, target: /sys, type: sysfs}
-  - {source: tmpfs, target: /tmp, type: tmpfs, flags: [nosuid, nodev]}
-# root:
-#   source: /dev/mmcblk0p2
-#   target: /newroot
-#   type: ext4
 hostname: device
 on_exit: reboot

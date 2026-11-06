@@ -28,7 +28,7 @@ executables and interpreters.
   build-time embedded YAML path; define precedence if both are present. Make a
   missing or invalid configuration fatal before changing system state. Document
   how to build a binary with embedded configuration.
-- [ ] Decide and document how paths are resolved before and after a root switch.
+- [x] Decide and document how paths are resolved before and after a root switch.
   Validate mount targets, module paths, service commands, and file destinations;
   reject contradictory or unsafe combinations early.
 
@@ -112,8 +112,8 @@ static interface settings, and the absent/present semantics of both files.
 - [x] Reap all children, including orphans adopted by PID 1. Coordinate SIGCHLD,
   service exits, and configured restart decisions without losing exit events.
 - [x] Handle termination signals: stop services, wait for a bounded grace
-  period, force-stop survivors, and reap children. Define what happens if the
-  a service exits or all configured services stop.
+  period, force-stop survivors, and reap children. Define what happens if a
+  service exits or all configured services stop.
 - [x] Implement configured reboot/poweroff behavior via the Linux reboot syscall
   after clean shutdown. Define the non-PID-1 behavior separately so development
   runs do not reboot the host.
@@ -123,19 +123,24 @@ backoff, orphan reaping, signal shutdown, and reboot-policy selection.
 
 ## 6. Build, validate, and document deployment
 
-- [ ] Add build instructions for a statically linked Linux binary and the target
+- [x] Add build instructions for a statically linked Linux binary and the target
   architectures used by embedded boards. Verify static linking for the release
   build rather than assuming it from build flags.
-- [ ] Add unit tests for config and pure decision logic, namespace tests for
-  mounts/networking where available, and QEMU boot tests for PID 1, root switch,
-  and shutdown. Skip privileged tests with an explicit reason when the required
-  environment is unavailable.
-- [ ] Document a minimal config, a root-switch config, config embedding, the
+- [x] Add unit tests for config and pure decision logic, and isolated QEMU boot
+  tests for mounts, networking, PID 1, root switch, and shutdown. Use host
+  namespace tests only where available; record an explicit reason if a required
+  QEMU fixture cannot run.
+- [x] Document a minimal config, a root-switch config, config embedding, the
   default `/dev/console` logging and YAML output setting, boot failure recovery,
   and the need to supply any configured service binaries or script interpreters.
-- [ ] Run `goimports` on Go files and use `GOCACHE=/tmp` for Go commands in this
+- [x] Run `goimports` on Go files and use `GOCACHE=/tmp` for Go commands in this
   workspace. Check the finished implementation against every README task.
 
 **Done when:** the documented examples boot in QEMU, test results and any
 hardware-only validation limits are recorded, and the README matches the
 implemented configuration and behavior.
+
+Validation on 2026-11-06: `GOCACHE=/tmp make verify` passed Go race tests,
+static ELF checks for Linux x86-64, ARM64, and ARMv7, and all eight unprivileged
+QEMU fixtures. Physical embedded boards and their storage, network, firmware,
+and device trees have not been tested.

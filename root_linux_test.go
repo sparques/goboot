@@ -10,8 +10,9 @@ import (
 
 type fakeRootSystem struct {
 	fakeMountSystem
-	events []string
-	fail   string
+	events         []string
+	fail           string
+	resolvedTarget string
 }
 
 func (f *fakeRootSystem) MkdirAll(path string, mode os.FileMode) error {
@@ -54,6 +55,13 @@ func (f *fakeRootSystem) Remove(path string) error {
 	return f.maybeFail("remove")
 }
 
+func (f *fakeRootSystem) EvalSymlinks(path string) (string, error) {
+	if f.resolvedTarget != "" {
+		return f.resolvedTarget, nil
+	}
+	return path, nil
+}
+
 func (f *fakeRootSystem) maybeFail(operation string) error {
 	if f.fail == operation {
 		return errors.New("denied")
@@ -67,7 +75,7 @@ func TestSwitchRootFromInitramfs(t *testing.T) {
 	if err := switchRoot(root, fake); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"mkdir /dev", "mount /dev", "mkdir /newroot", "mount /newroot", "unmount /dev", "chdir /newroot", "move . /", "chroot .", "chdir /"}
+	want := []string{"mkdir /newroot", "mkdir /dev", "mount /dev", "mkdir /newroot", "mount /newroot", "unmount /dev", "chdir /newroot", "move . /", "chroot .", "chdir /"}
 	if !reflect.DeepEqual(fake.events, want) {
 		t.Fatalf("events = %v, want %v", fake.events, want)
 	}
@@ -79,7 +87,7 @@ func TestSwitchRootByPivot(t *testing.T) {
 	if err := switchRoot(root, fake); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"mkdir /dev", "mount /dev", "mkdir /newroot", "mount /newroot", "unmount /dev", "mkdir /newroot/.goboot-old-root", "pivot /newroot /newroot/.goboot-old-root", "chdir /", "unmount /.goboot-old-root", "remove /.goboot-old-root"}
+	want := []string{"mkdir /newroot", "mkdir /dev", "mount /dev", "mkdir /newroot", "mount /newroot", "unmount /dev", "mkdir /newroot/.goboot-old-root", "pivot /newroot /newroot/.goboot-old-root", "chdir /", "unmount /.goboot-old-root", "remove /.goboot-old-root"}
 	if !reflect.DeepEqual(fake.events, want) {
 		t.Fatalf("events = %v, want %v", fake.events, want)
 	}
@@ -91,7 +99,18 @@ func TestSwitchRootStopsOnMoveFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "move new root") {
 		t.Fatalf("error = %v", err)
 	}
-	if strings.Join(fake.events, ",") != "mkdir /dev,mount /dev,mkdir /newroot,mount /newroot,unmount /dev,chdir /newroot,move . /" {
+	if strings.Join(fake.events, ",") != "mkdir /newroot,mkdir /dev,mount /dev,mkdir /newroot,mount /newroot,unmount /dev,chdir /newroot,move . /" {
+		t.Fatalf("events = %v", fake.events)
+	}
+}
+
+func TestSwitchRootRejectsSymlinkedTargetBeforeMounting(t *testing.T) {
+	fake := &fakeRootSystem{fakeMountSystem: fakeMountSystem{info: "1 0 0:1 / / rw - rootfs rootfs rw\n"}, resolvedTarget: "/dev/newroot"}
+	err := switchRoot(MountConfig{Source: "/dev/vda", Target: "/newroot", Type: "ext4"}, fake)
+	if err == nil || !strings.Contains(err.Error(), "resolves to") {
+		t.Fatalf("error = %v", err)
+	}
+	if !reflect.DeepEqual(fake.events, []string{"mkdir /newroot"}) {
 		t.Fatalf("events = %v", fake.events)
 	}
 }
