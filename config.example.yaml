@@ -1,0 +1,36 @@
+# Illustrative configuration. Remove the optional sections you do not need.
+version: 1
+logging:
+  output: /dev/console
+module_tree: /lib/modules/6.12.0
+modules:
+  - drivers/net/ethernet/example.ko
+mounts:
+  - {source: proc, target: /proc, type: proc}
+  - {source: devtmpfs, target: /dev, type: devtmpfs}
+  - {source: sysfs, target: /sys, type: sysfs}
+  - {source: tmpfs, target: /tmp, type: tmpfs, flags: [nosuid, nodev]}
+# root:
+#   source: /dev/mmcblk0p2
+#   target: /newroot
+#   type: ext4
+hostname: device
+interfaces:
+  - name: eth0
+    addresses: [192.0.2.10/24]
+    routes:
+      - {destination: 0.0.0.0/0, gateway: 192.0.2.1}
+resolv_conf: |
+  nameserver 192.0.2.1
+hosts: |
+  127.0.0.1 localhost
+environment:
+  PATH: /usr/bin:/bin
+services:
+  - name: app
+    command: [/usr/bin/app, --foreground]
+    directory: /
+    environment:
+      MODE: production
+    restart: on-failure
+on_exit: reboot
